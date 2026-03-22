@@ -22,3 +22,35 @@ Content-Type: application/json
   "email": "user@test.com",
   "password": "user123"
 }
+
+###
+
+### Start session - training
+POST http://localhost:8787/api/session/start
+Content-Type: application/json
+
+{
+  "userId": "2",
+  "mode": "training",
+  "durationSeconds": 900
+}
+
+###
+
+### Get session - user 2
+GET http://localhost:8787/api/session/2
+
+###
+
+### Stop session - user 2
+POST http://localhost:8787/api/session/stop
+Content-Type: application/json
+
+{
+  "userId": "2"
+}
+
+###
+
+### Get session after stop - user 2
+GET http://localhost:8787/api/session/2

@@ -17,6 +17,9 @@ importers:
       '@repo/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@repo/session':
+        specifier: workspace:*
+        version: link:../../packages/session
       '@repo/telemetry':
         specifier: workspace:*
         version: link:../../packages/telemetry
@@ -31,7 +34,7 @@ importers:
         specifier: ^5.8.2
         version: 5.9.3
       wrangler:
-        specifier: ^4.8.0
+        specifier: ^4.76.0
         version: 4.76.0(@cloudflare/workers-types@4.20260317.1)
 
   apps/web:
@@ -96,6 +99,8 @@ importers:
         version: link:../core
 
   packages/core: {}
+
+  packages/session: {}
 
   packages/telemetry: {}
 
