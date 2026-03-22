@@ -1,29 +1,14 @@
-import { useEffect, useState } from "react";
-import "./index.css";
-
 function App() {
-  const [status, setStatus] = useState("loading...");
-
-  useEffect(() => {
-    fetch("http://localhost:8787/api/health")
-      .then((res) => res.json())
-      .then((data) => setStatus(data.status))
-      .catch(() => setStatus("error"));
-  }, []);
-
   return (
-    <main className="page">
-      <section className="card">
-        <p className="eyebrow">Training Timer Hub</p>
-        <h1 className="title">L1 Modular Monolith Bootstrap</h1>
-        <p className="description">
-          Frontend and backend are connected successfully. This is the initial
-          foundation for the Training Timer Hub project.
+    <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+      <section className="w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900 p-10 shadow-2xl">
+        <p className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-400">
+          Training Timer Hub
         </p>
-        <div className="status-box">
-          <span className="status-label">API Status</span>
-          <span className="status-value">{status}</span>
-        </div>
+        <h1 className="mb-4 text-5xl font-bold">Tailwind is working</h1>
+        <p className="text-slate-300">
+          Frontend styling is now powered by Tailwind CSS.
+        </p>
       </section>
     </main>
   );
