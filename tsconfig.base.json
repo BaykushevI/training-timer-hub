@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@repo/core": ["packages/core/src/index.ts"],
+      "@repo/auth": ["packages/auth/src/index.ts"],
+      "@repo/telemetry": ["packages/telemetry/src/index.ts"]
+    }
+  }
+}

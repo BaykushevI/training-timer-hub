@@ -1,0 +1,24 @@
+### Health
+GET http://localhost:8787/api/health
+
+###
+
+### Login - admin
+POST http://localhost:8787/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@test.com",
+  "password": "admin123"
+}
+
+###
+
+### Login - user
+POST http://localhost:8787/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@test.com",
+  "password": "user123"
+}
