@@ -10,7 +10,10 @@
   "dependencies": {
     "@repo/auth": "workspace:*",
     "@repo/session": "workspace:*",
+    "@repo/settings": "workspace:*",
     "@repo/telemetry": "workspace:*",
+    "@repo/alerts": "workspace:*",
+    "@repo/history": "workspace:*",
     "hono": "^4.8.5"
   },
   "devDependencies": {

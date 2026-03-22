@@ -9,7 +9,10 @@
       "@repo/core": ["packages/core/src/index.ts"],
       "@repo/auth": ["packages/auth/src/index.ts"],
       "@repo/telemetry": ["packages/telemetry/src/index.ts"],
-      "@repo/session": ["packages/session/src/index.ts"]
+      "@repo/session": ["packages/session/src/index.ts"],
+      "@repo/history": ["packages/history/src/index.ts"],
+      "@repo/alerts": ["packages/alerts/src/index.ts"],
+      "@repo/settings": ["packages/settings/src/index.ts"]
     }
   }
 }

@@ -14,12 +14,21 @@ importers:
 
   apps/api:
     dependencies:
+      '@repo/alerts':
+        specifier: workspace:*
+        version: link:../../packages/alerts
       '@repo/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@repo/history':
+        specifier: workspace:*
+        version: link:../../packages/history
       '@repo/session':
         specifier: workspace:*
         version: link:../../packages/session
+      '@repo/settings':
+        specifier: workspace:*
+        version: link:../../packages/settings
       '@repo/telemetry':
         specifier: workspace:*
         version: link:../../packages/telemetry
@@ -92,6 +101,8 @@ importers:
         specifier: ^8.0.1
         version: 8.0.1(@types/node@24.12.0)(esbuild@0.27.3)(jiti@1.21.7)(yaml@2.8.3)
 
+  packages/alerts: {}
+
   packages/auth:
     dependencies:
       '@repo/core':
@@ -100,7 +111,11 @@ importers:
 
   packages/core: {}
 
+  packages/history: {}
+
   packages/session: {}
+
+  packages/settings: {}
 
   packages/telemetry: {}
 

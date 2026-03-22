@@ -54,3 +54,86 @@ Content-Type: application/json
 
 ### Get session after stop - user 2
 GET http://localhost:8787/api/session/2
+
+###
+
+### Get settings - user 2
+GET http://localhost:8787/api/settings/2
+
+###
+
+### Update settings - user 2
+PUT http://localhost:8787/api/settings/2
+Content-Type: application/json
+
+{
+  "trainingDurationSeconds": 600,
+  "focusDurationSeconds": 1200
+}
+
+###
+
+### Get settings after update - user 2
+GET http://localhost:8787/api/settings/2
+
+###
+
+### Pause session - user 2
+POST http://localhost:8787/api/session/pause
+Content-Type: application/json
+
+{
+  "userId": "2"
+}
+
+###
+
+### Resume session - user 2
+POST http://localhost:8787/api/session/resume
+Content-Type: application/json
+
+{
+  "userId": "2"
+}
+
+###
+
+### Get history - user 2
+GET http://localhost:8787/api/history/2
+
+###
+
+### Get admin alerts
+GET http://localhost:8787/api/admin/alerts
+
+###
+
+### Get admin rules
+GET http://localhost:8787/api/admin/rules
+
+###
+
+### Update failed login threshold
+PUT http://localhost:8787/api/admin/rules/failed_logins_spike
+Content-Type: application/json
+
+{
+  "threshold": 2,
+  "enabled": true
+}
+
+###
+
+### Failed login
+POST http://localhost:8787/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@test.com",
+  "password": "wrong"
+}
+
+###
+
+### Acknowledge alert
+POST http://localhost:8787/api/admin/alerts/REPLACE_ALERT_ID/ack
