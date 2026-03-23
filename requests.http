@@ -1,10 +1,13 @@
+@baseUrl = http://localhost:8787
+@token = PASTE_TOKEN_HERE
+
 ### Health
-GET http://localhost:8787/api/health
+GET {{baseUrl}}/api/health
 
 ###
 
 ### Login - admin
-POST http://localhost:8787/api/auth/login
+POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
 {
@@ -15,7 +18,7 @@ Content-Type: application/json
 ###
 
 ### Login - user
-POST http://localhost:8787/api/auth/login
+POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
 {
@@ -25,61 +28,47 @@ Content-Type: application/json
 
 ###
 
-### Start session - training
-POST http://localhost:8787/api/session/start
-Content-Type: application/json
-
-{
-  "userId": "2",
-  "mode": "training",
-  "durationSeconds": 900
-}
-
-###
-
-### Get session - user 2
-GET http://localhost:8787/api/session/2
-
-###
-
-### Stop session - user 2
-POST http://localhost:8787/api/session/stop
-Content-Type: application/json
-
-{
-  "userId": "2"
-}
-
-###
-
-### Get session after stop - user 2
-GET http://localhost:8787/api/session/2
-
-###
-
 ### Get settings - user 2
-GET http://localhost:8787/api/settings/2
+GET {{baseUrl}}/api/settings/2
+Authorization: Bearer {{token}}
 
 ###
 
 ### Update settings - user 2
-PUT http://localhost:8787/api/settings/2
+PUT {{baseUrl}}/api/settings/2
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-  "trainingDurationSeconds": 600,
-  "focusDurationSeconds": 1200
+  "training": {
+    "workSeconds": 45,
+    "restSeconds": 15,
+    "rounds": 4
+  },
+  "focus": {
+    "focusSeconds": 1500,
+    "shortBreakSeconds": 300,
+    "cycles": 4
+  }
 }
 
 ###
 
-### Get settings after update - user 2
-GET http://localhost:8787/api/settings/2
+### Start training session - user 2
+POST {{baseUrl}}/api/session/start
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "userId": "2",
+  "mode": "training"
+}
 
 ###
 
 ### Pause session - user 2
-POST http://localhost:8787/api/session/pause
+POST {{baseUrl}}/api/session/pause
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -89,7 +78,8 @@ Content-Type: application/json
 ###
 
 ### Resume session - user 2
-POST http://localhost:8787/api/session/resume
+POST {{baseUrl}}/api/session/resume
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
@@ -98,42 +88,64 @@ Content-Type: application/json
 
 ###
 
+### Stop session - user 2
+POST {{baseUrl}}/api/session/stop
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "userId": "2"
+}
+
+###
+
+### Complete session - user 2
+POST {{baseUrl}}/api/session/complete
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "userId": "2"
+}
+
+###
+
+### Get active session - user 2
+GET {{baseUrl}}/api/session/2
+Authorization: Bearer {{token}}
+
+###
+
 ### Get history - user 2
-GET http://localhost:8787/api/history/2
+GET {{baseUrl}}/api/history/2
+Authorization: Bearer {{token}}
+
+###
+
+### Get admin telemetry
+GET {{baseUrl}}/api/admin/telemetry
+Authorization: Bearer {{token}}
 
 ###
 
 ### Get admin alerts
-GET http://localhost:8787/api/admin/alerts
+GET {{baseUrl}}/api/admin/alerts
+Authorization: Bearer {{token}}
 
 ###
 
 ### Get admin rules
-GET http://localhost:8787/api/admin/rules
+GET {{baseUrl}}/api/admin/rules
+Authorization: Bearer {{token}}
 
 ###
 
 ### Update failed login threshold
-PUT http://localhost:8787/api/admin/rules/failed_logins_spike
+PUT {{baseUrl}}/api/admin/rules/failed_logins_spike
+Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
   "threshold": 2,
   "enabled": true
 }
-
-###
-
-### Failed login
-POST http://localhost:8787/api/auth/login
-Content-Type: application/json
-
-{
-  "email": "admin@test.com",
-  "password": "wrong"
-}
-
-###
-
-### Acknowledge alert
-POST http://localhost:8787/api/admin/alerts/REPLACE_ALERT_ID/ack
