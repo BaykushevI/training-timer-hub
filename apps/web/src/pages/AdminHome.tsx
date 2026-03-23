@@ -1,29 +1,7 @@
 import { useEffect, useState } from "react";
+import type { TelemetryEvent, AlertRecord, AlertRule } from "@repo/core";
 import { AppShell } from "../components/AppShell";
 import type { LoggedInUser } from "./LoginPage";
-
-type TelemetryEvent = {
-  type: string;
-  timestamp: number;
-  metadata?: Record<string, unknown>;
-};
-
-type AlertRecord = {
-  id: string;
-  ruleCode: string;
-  message: string;
-  status: "open" | "acknowledged";
-  createdAt: number;
-  acknowledgedAt: number | null;
-  metadata?: Record<string, unknown>;
-};
-
-type AlertRule = {
-  code: string;
-  label: string;
-  enabled: boolean;
-  threshold: number;
-};
 
 const API_BASE_URL = "http://localhost:8787";
 
@@ -37,11 +15,22 @@ export function AdminHome({ user, onLogout }: AdminHomeProps) {
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
 
+  const authHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${user.token}`,
+  };
+
   async function loadAdminData() {
     const [telemetryRes, alertsRes, rulesRes] = await Promise.all([
-      fetch(`${API_BASE_URL}/api/admin/telemetry`),
-      fetch(`${API_BASE_URL}/api/admin/alerts`),
-      fetch(`${API_BASE_URL}/api/admin/rules`),
+      fetch(`${API_BASE_URL}/api/admin/telemetry`, {
+        headers: { Authorization: `Bearer ${user.token}` },
+      }),
+      fetch(`${API_BASE_URL}/api/admin/alerts`, {
+        headers: { Authorization: `Bearer ${user.token}` },
+      }),
+      fetch(`${API_BASE_URL}/api/admin/rules`, {
+        headers: { Authorization: `Bearer ${user.token}` },
+      }),
     ]);
 
     const telemetryData = await telemetryRes.json();
@@ -60,6 +49,7 @@ export function AdminHome({ user, onLogout }: AdminHomeProps) {
   async function handleAcknowledge(alertId: string) {
     await fetch(`${API_BASE_URL}/api/admin/alerts/${alertId}/ack`, {
       method: "POST",
+      headers: authHeaders,
     });
 
     await loadAdminData();
@@ -68,12 +58,8 @@ export function AdminHome({ user, onLogout }: AdminHomeProps) {
   async function handleThresholdChange(ruleCode: string, threshold: number) {
     await fetch(`${API_BASE_URL}/api/admin/rules/${ruleCode}`, {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        threshold,
-      }),
+      headers: authHeaders,
+      body: JSON.stringify({ threshold }),
     });
 
     await loadAdminData();
@@ -82,12 +68,8 @@ export function AdminHome({ user, onLogout }: AdminHomeProps) {
   async function handleToggleRule(ruleCode: string, enabled: boolean) {
     await fetch(`${API_BASE_URL}/api/admin/rules/${ruleCode}`, {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        enabled,
-      }),
+      headers: authHeaders,
+      body: JSON.stringify({ enabled }),
     });
 
     await loadAdminData();

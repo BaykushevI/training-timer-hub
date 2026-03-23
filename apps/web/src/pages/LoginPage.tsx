@@ -1,16 +1,16 @@
 import { useState } from "react";
 import type { SyntheticEvent } from "react";
 
-type UserRole = "user" | "admin";
-
 export type LoggedInUser = {
   id: string;
   email: string;
-  role: UserRole;
+  role: "user" | "admin";
+  token: string;
 };
 
 type LoginResponse = {
-  user?: LoggedInUser;
+  user?: Omit<LoggedInUser, "token">;
+  token?: string;
   error?: string;
 };
 
@@ -42,12 +42,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
       const data = (await response.json()) as LoginResponse;
 
-      if (!response.ok || !data.user) {
+      if (!response.ok || !data.user || !data.token) {
         setError(data.error ?? "Login failed");
         return;
       }
 
-      onLogin(data.user);
+      onLogin({ ...data.user, token: data.token });
     } catch {
       setError("Unable to reach API");
     } finally {

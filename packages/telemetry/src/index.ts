@@ -1,8 +1,6 @@
-export type TelemetryEvent = {
-  type: string;
-  timestamp: number;
-  metadata?: Record<string, unknown>;
-};
+import type { TelemetryEvent } from "@repo/core";
+
+export type { TelemetryEvent };
 
 const events: TelemetryEvent[] = [];
 
@@ -11,6 +9,6 @@ export function trackEvent(event: TelemetryEvent) {
   console.log("Telemetry:", event);
 }
 
-export function getEvents() {
+export function getEvents(): TelemetryEvent[] {
   return events;
 }

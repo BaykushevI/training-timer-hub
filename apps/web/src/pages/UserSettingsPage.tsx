@@ -1,15 +1,3 @@
-type TrainingSettings = {
-  workSeconds: number;
-  restSeconds: number;
-  rounds: number;
-};
-
-type FocusSettings = {
-  focusSeconds: number;
-  shortBreakSeconds: number;
-  cycles: number;
-};
-
 type UserSettingsPageProps = {
   trainingWorkSeconds: number;
   trainingRestSeconds: number;
@@ -140,10 +128,18 @@ export function UserSettingsPage({
           {savingSettings ? "Saving Settings..." : "Save Settings"}
         </button>
 
-        <div className="mt-4 rounded-2xl border border-sky-900/40 bg-sky-950/30 p-5 text-sky-300">
-          Settings are edited separately from timer execution for cleaner
-          workspace UX.
-        </div>
+        {isRunning ? (
+          <div className="mt-4 rounded-2xl border border-amber-900/40 bg-amber-950/30 p-5 text-sm text-amber-300">
+            A session is currently active. Stop the session before changing
+            settings. Active sessions use the config snapshot captured at start
+            time and are not affected by settings changes.
+          </div>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-sky-900/40 bg-sky-950/30 p-5 text-sm text-sky-300">
+            Settings are applied at session start. Changing them here will not
+            affect any session already in progress.
+          </div>
+        )}
       </div>
     </div>
   );

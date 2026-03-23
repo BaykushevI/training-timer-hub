@@ -1,38 +1,13 @@
-export type SessionMode = "training" | "focus";
-export type SessionStatus = "running" | "paused" | "stopped";
+import type {
+  Session,
+  SessionMode,
+  SessionStatus,
+  SessionConfigSnapshot,
+  TrainingConfig,
+  FocusConfig,
+} from "@repo/core";
 
-export type TrainingSessionConfig = {
-  workSeconds: number;
-  restSeconds: number;
-  rounds: number;
-};
-
-export type FocusSessionConfig = {
-  focusSeconds: number;
-  shortBreakSeconds: number;
-  cycles: number;
-};
-
-export type SessionConfigSnapshot =
-  | {
-      mode: "training";
-      training: TrainingSessionConfig;
-    }
-  | {
-      mode: "focus";
-      focus: FocusSessionConfig;
-    };
-
-export type Session = {
-  id: string;
-  userId: string;
-  mode: SessionMode;
-  startedAt: number;
-  status: SessionStatus;
-  pausedAt: number | null;
-  totalPausedMs: number;
-  configSnapshot: SessionConfigSnapshot;
-};
+export type { Session, SessionMode, SessionStatus, SessionConfigSnapshot };
 
 const sessions = new Map<string, Session>();
 
@@ -40,17 +15,17 @@ function generateSessionId() {
   return crypto.randomUUID();
 }
 
+function isActiveStatus(status: SessionStatus): boolean {
+  return status === "running" || status === "paused";
+}
+
 export function startTrainingSession(params: {
   userId: string;
-  training: TrainingSessionConfig;
+  training: TrainingConfig;
 }): Session {
   const existingSession = sessions.get(params.userId);
 
-  if (
-    existingSession &&
-    (existingSession.status === "running" ||
-      existingSession.status === "paused")
-  ) {
+  if (existingSession && isActiveStatus(existingSession.status)) {
     throw new Error("ACTIVE_SESSION_ALREADY_EXISTS");
   }
 
@@ -69,21 +44,16 @@ export function startTrainingSession(params: {
   };
 
   sessions.set(params.userId, session);
-
   return session;
 }
 
 export function startFocusSession(params: {
   userId: string;
-  focus: FocusSessionConfig;
+  focus: FocusConfig;
 }): Session {
   const existingSession = sessions.get(params.userId);
 
-  if (
-    existingSession &&
-    (existingSession.status === "running" ||
-      existingSession.status === "paused")
-  ) {
+  if (existingSession && isActiveStatus(existingSession.status)) {
     throw new Error("ACTIVE_SESSION_ALREADY_EXISTS");
   }
 
@@ -102,7 +72,6 @@ export function startFocusSession(params: {
   };
 
   sessions.set(params.userId, session);
-
   return session;
 }
 
@@ -120,7 +89,6 @@ export function pauseSession(userId: string): Session | null {
   };
 
   sessions.set(userId, pausedSession);
-
   return pausedSession;
 }
 
@@ -145,14 +113,16 @@ export function resumeSession(userId: string): Session | null {
   };
 
   sessions.set(userId, resumedSession);
-
   return resumedSession;
 }
 
 export function stopSession(userId: string): Session | null {
   const existingSession = sessions.get(userId);
 
-  if (!existingSession) {
+  // Guard: only active sessions can be stopped.
+  // Returning null for stopped/completed sessions prevents duplicate history
+  // records when the client calls stop more than once (double-click, retry).
+  if (!existingSession || !isActiveStatus(existingSession.status)) {
     return null;
   }
 
@@ -170,22 +140,39 @@ export function stopSession(userId: string): Session | null {
   };
 
   sessions.set(userId, stoppedSession);
-
   return stoppedSession;
 }
 
-export function getSession(userId: string): Session | null {
-  return sessions.get(userId) ?? null;
-}
+/**
+ * Marks a running session as naturally completed (timer reached zero).
+ * Only valid for running sessions — a paused session cannot auto-complete
+ * because time is not advancing while paused.
+ */
+export function completeSession(userId: string): Session | null {
+  const existingSession = sessions.get(userId);
 
-export function getActiveSession(userId: string): Session | null {
-  const session = sessions.get(userId);
-
-  if (!session) {
+  if (!existingSession || existingSession.status !== "running") {
     return null;
   }
 
-  if (session.status === "stopped") {
+  const completedSession: Session = {
+    ...existingSession,
+    status: "completed",
+    pausedAt: null,
+  };
+
+  sessions.set(userId, completedSession);
+  return completedSession;
+}
+
+/**
+ * Returns the session only if it is still active (running or paused).
+ * Stopped and completed sessions return null — they are terminal states.
+ */
+export function getActiveSession(userId: string): Session | null {
+  const session = sessions.get(userId);
+
+  if (!session || !isActiveStatus(session.status)) {
     return null;
   }
 

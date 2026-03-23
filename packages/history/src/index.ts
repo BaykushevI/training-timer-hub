@@ -1,12 +1,6 @@
-export type HistoryRecord = {
-  id: string;
-  userId: string;
-  mode: "training" | "focus";
-  startedAt: number;
-  endedAt: number;
-  finalStatus: "stopped";
-  configSnapshot: Record<string, unknown>;
-};
+import type { HistoryRecord, HistoryFinalStatus, SessionConfigSnapshot, SessionMode } from "@repo/core";
+
+export type { HistoryRecord, HistoryFinalStatus };
 
 const historyStore = new Map<string, HistoryRecord[]>();
 
@@ -16,11 +10,11 @@ function generateHistoryId() {
 
 export function addHistoryRecord(params: {
   userId: string;
-  mode: "training" | "focus";
+  mode: SessionMode;
   startedAt: number;
   endedAt: number;
-  finalStatus: "stopped";
-  configSnapshot: Record<string, unknown>;
+  finalStatus: HistoryFinalStatus;
+  configSnapshot: SessionConfigSnapshot;
 }): HistoryRecord {
   const record: HistoryRecord = {
     id: generateHistoryId(),

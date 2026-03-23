@@ -1,52 +1,5 @@
-type TrainingSettings = {
-  workSeconds: number;
-  restSeconds: number;
-  rounds: number;
-};
-
-type FocusSettings = {
-  focusSeconds: number;
-  shortBreakSeconds: number;
-  cycles: number;
-};
-
-type Session =
-  | {
-      id: string;
-      userId: string;
-      mode: "training";
-      startedAt: number;
-      status: "running" | "paused" | "stopped";
-      pausedAt: number | null;
-      totalPausedMs: number;
-      configSnapshot: {
-        mode: "training";
-        training: TrainingSettings;
-      };
-    }
-  | {
-      id: string;
-      userId: string;
-      mode: "focus";
-      startedAt: number;
-      status: "running" | "paused" | "stopped";
-      pausedAt: number | null;
-      totalPausedMs: number;
-      configSnapshot: {
-        mode: "focus";
-        focus: FocusSettings;
-      };
-    };
-
-type HistoryRecord = {
-  id: string;
-  userId: string;
-  mode: "training" | "focus";
-  startedAt: number;
-  endedAt: number;
-  finalStatus: "stopped";
-  configSnapshot: Record<string, unknown>;
-};
+import { useEffect } from "react";
+import type { Session, HistoryRecord } from "@repo/core";
 
 type UserTimerPageProps = {
   tab: "training" | "focus";
@@ -59,6 +12,7 @@ type UserTimerPageProps = {
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
+  onComplete: () => void;
 };
 
 function formatSeconds(totalSeconds: number) {
@@ -76,11 +30,10 @@ function getEffectiveElapsedSeconds(session: Session, now: number) {
   return Math.max(0, Math.floor(elapsedMs / 1000));
 }
 
-function getTrainingDerivedState(
-  session: Extract<Session, { mode: "training" }>,
-  now: number,
-) {
-  const { workSeconds, restSeconds, rounds } = session.configSnapshot.training;
+function getTrainingDerivedState(session: Session, now: number) {
+  const snapshot = session.configSnapshot;
+  if (snapshot.mode !== "training") return null;
+  const { workSeconds, restSeconds, rounds } = snapshot.training;
   const totalCycleSeconds = workSeconds + restSeconds;
   const elapsedSeconds = getEffectiveElapsedSeconds(session, now);
   const totalProgramSeconds = totalCycleSeconds * rounds;
@@ -89,6 +42,8 @@ function getTrainingDerivedState(
     0,
     totalProgramSeconds - elapsedSeconds,
   );
+
+  const programComplete = remainingProgramSeconds === 0;
   const completedCycles = Math.floor(elapsedSeconds / totalCycleSeconds);
   const currentRound = Math.min(rounds, completedCycles + 1);
 
@@ -96,9 +51,15 @@ function getTrainingDerivedState(
   const inWorkPhase = secondsIntoCycle < workSeconds;
 
   const phase = inWorkPhase ? "work" : "rest";
-  const phaseRemainingSeconds = inWorkPhase
-    ? Math.max(0, workSeconds - secondsIntoCycle)
-    : Math.max(0, totalCycleSeconds - secondsIntoCycle);
+
+  // Clamp phase remaining to 0 when the program is complete.
+  // Without this, the phase timer keeps cycling even after the total reaches
+  // zero, producing a contradictory display (total: 00:00, phase: 00:40).
+  const phaseRemainingSeconds = programComplete
+    ? 0
+    : inWorkPhase
+      ? Math.max(0, workSeconds - secondsIntoCycle)
+      : Math.max(0, totalCycleSeconds - secondsIntoCycle);
 
   return {
     currentRound,
@@ -106,15 +67,14 @@ function getTrainingDerivedState(
     phase,
     phaseRemainingSeconds,
     remainingProgramSeconds,
+    programComplete,
   };
 }
 
-function getFocusDerivedState(
-  session: Extract<Session, { mode: "focus" }>,
-  now: number,
-) {
-  const { focusSeconds, shortBreakSeconds, cycles } =
-    session.configSnapshot.focus;
+function getFocusDerivedState(session: Session, now: number) {
+  const snapshot = session.configSnapshot;
+  if (snapshot.mode !== "focus") return null;
+  const { focusSeconds, shortBreakSeconds, cycles } = snapshot.focus;
   const totalCycleSeconds = focusSeconds + shortBreakSeconds;
   const elapsedSeconds = getEffectiveElapsedSeconds(session, now);
   const totalProgramSeconds = totalCycleSeconds * cycles;
@@ -123,6 +83,8 @@ function getFocusDerivedState(
     0,
     totalProgramSeconds - elapsedSeconds,
   );
+
+  const programComplete = remainingProgramSeconds === 0;
   const completedCycles = Math.floor(elapsedSeconds / totalCycleSeconds);
   const currentCycle = Math.min(cycles, completedCycles + 1);
 
@@ -130,9 +92,12 @@ function getFocusDerivedState(
   const inFocusPhase = secondsIntoCycle < focusSeconds;
 
   const phase = inFocusPhase ? "focus" : "break";
-  const phaseRemainingSeconds = inFocusPhase
-    ? Math.max(0, focusSeconds - secondsIntoCycle)
-    : Math.max(0, totalCycleSeconds - secondsIntoCycle);
+
+  const phaseRemainingSeconds = programComplete
+    ? 0
+    : inFocusPhase
+      ? Math.max(0, focusSeconds - secondsIntoCycle)
+      : Math.max(0, totalCycleSeconds - secondsIntoCycle);
 
   return {
     currentCycle,
@@ -140,6 +105,7 @@ function getFocusDerivedState(
     phase,
     phaseRemainingSeconds,
     remainingProgramSeconds,
+    programComplete,
   };
 }
 
@@ -154,6 +120,7 @@ export function UserTimerPage({
   onPause,
   onResume,
   onStop,
+  onComplete,
 }: UserTimerPageProps) {
   const activeMode = session?.mode ?? null;
   const currentTabOwnsSession = activeMode === tab;
@@ -163,28 +130,39 @@ export function UserTimerPage({
   let mainRemaining = "00:00";
   let secondaryLabel = "No active session";
   let secondaryValue = "--";
+  let programComplete = false;
 
-  if (session?.mode === "training" && session.status !== "stopped") {
+  if (session?.mode === "training" && session.status !== "stopped" && session.status !== "completed") {
     const derived = getTrainingDerivedState(session, now);
-    mainRemaining = formatSeconds(derived.phaseRemainingSeconds);
-    secondaryLabel = `Round ${derived.currentRound}/${derived.totalRounds}`;
-    secondaryValue = `${derived.phase} phase · total left ${formatSeconds(
-      derived.remainingProgramSeconds,
-    )}`;
+    if (derived) {
+      mainRemaining = formatSeconds(derived.phaseRemainingSeconds);
+      secondaryLabel = `Round ${derived.currentRound}/${derived.totalRounds}`;
+      secondaryValue = `${derived.phase} phase · total left ${formatSeconds(derived.remainingProgramSeconds)}`;
+      programComplete = derived.programComplete;
+    }
   }
 
-  if (session?.mode === "focus" && session.status !== "stopped") {
+  if (session?.mode === "focus" && session.status !== "stopped" && session.status !== "completed") {
     const derived = getFocusDerivedState(session, now);
-    mainRemaining = formatSeconds(derived.phaseRemainingSeconds);
-    secondaryLabel = `Cycle ${derived.currentCycle}/${derived.totalCycles}`;
-    secondaryValue = `${derived.phase} phase · total left ${formatSeconds(
-      derived.remainingProgramSeconds,
-    )}`;
+    if (derived) {
+      mainRemaining = formatSeconds(derived.phaseRemainingSeconds);
+      secondaryLabel = `Cycle ${derived.currentCycle}/${derived.totalCycles}`;
+      secondaryValue = `${derived.phase} phase · total left ${formatSeconds(derived.remainingProgramSeconds)}`;
+      programComplete = derived.programComplete;
+    }
   }
+
+  // Auto-complete: when the running timer reaches zero, call onComplete.
+  // This fires at most once per session (guard is in UserHome via a ref).
+  useEffect(() => {
+    if (isRunning && currentTabOwnsSession && programComplete) {
+      onComplete();
+    }
+  }, [isRunning, currentTabOwnsSession, programComplete, onComplete]);
 
   const title = tab === "training" ? "Training Timer" : "Focus Timer";
   const startLabel = tab === "training" ? "Start Training" : "Start Focus";
-  const hasBlockingSession = !!session && session.status !== "stopped";
+  const hasBlockingSession = !!session && session.status !== "stopped" && session.status !== "completed";
   const startDisabled = loading || hasBlockingSession;
   const pauseDisabled = loading || !isRunning || !currentTabOwnsSession;
   const resumeDisabled = loading || !isPaused || !currentTabOwnsSession;
@@ -320,13 +298,19 @@ export function UserTimerPage({
                     <p className="font-medium capitalize text-slate-100">
                       {record.mode}
                     </p>
-                    <p className="text-xs text-slate-500">
-                      {new Date(record.endedAt).toLocaleTimeString()}
-                    </p>
+                    <span
+                      className={`rounded-lg px-2 py-0.5 text-xs font-medium ${
+                        record.finalStatus === "completed"
+                          ? "bg-emerald-500/15 text-emerald-300"
+                          : "bg-slate-700 text-slate-400"
+                      }`}
+                    >
+                      {record.finalStatus}
+                    </span>
                   </div>
-
                   <p className="mt-2 text-xs text-slate-400">
-                    Started {new Date(record.startedAt).toLocaleTimeString()}
+                    Started {new Date(record.startedAt).toLocaleTimeString()} ·
+                    ended {new Date(record.endedAt).toLocaleTimeString()}
                   </p>
                 </div>
               ))

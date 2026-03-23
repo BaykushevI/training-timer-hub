@@ -1,4 +1,4 @@
-import { login } from "@repo/auth";
+import { login, createToken, validateToken } from "@repo/auth";
 import {
   getActiveSession,
   pauseSession,
@@ -6,6 +6,7 @@ import {
   startFocusSession,
   startTrainingSession,
   stopSession,
+  completeSession,
 } from "@repo/session";
 import { getUserSettings, updateUserSettings } from "@repo/settings";
 import { getEvents, trackEvent } from "@repo/telemetry";
@@ -19,12 +20,15 @@ import {
 import { addHistoryRecord, getHistoryForUser } from "@repo/history";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import type { Context, Next } from "hono";
 
 const app = new Hono();
 
 function evaluateSystemAlerts() {
   evaluateAlerts(getEvents());
 }
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
 
 app.use(
   "*",
@@ -35,9 +39,61 @@ app.use(
   }),
 );
 
+// ── Auth middleware ───────────────────────────────────────────────────────────
+
+/**
+ * requireAuth: any valid token (user or admin).
+ * Applied to all session, settings, and history routes.
+ */
+async function requireAuth(c: Context, next: Next) {
+  const authHeader = c.req.header("Authorization");
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const token = authHeader.slice(7);
+  const user = validateToken(token);
+
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  return next();
+}
+
+/**
+ * requireAdmin: token must belong to a user with role === "admin".
+ * Applied to all /api/admin/* routes.
+ */
+async function requireAdmin(c: Context, next: Next) {
+  const authHeader = c.req.header("Authorization");
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const token = authHeader.slice(7);
+  const user = validateToken(token);
+
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  if (user.role !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  return next();
+}
+
+// ── Health ────────────────────────────────────────────────────────────────────
+
 app.get("/api/health", (c) => {
   return c.json({ status: "ok" });
 });
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
 
 app.post("/api/auth/login", async (c) => {
   const body = await c.req.json();
@@ -57,6 +113,8 @@ app.post("/api/auth/login", async (c) => {
     return c.json({ error: "Invalid credentials" }, 401);
   }
 
+  const token = createToken(user);
+
   trackEvent({
     type: "auth.login.success",
     timestamp: Date.now(),
@@ -71,50 +129,64 @@ app.post("/api/auth/login", async (c) => {
       email: user.email,
       role: user.role,
     },
+    token,
   });
 });
 
-app.get("/api/settings/:userId", (c) => {
-  const userId = c.req.param("userId");
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+app.get("/api/settings/:userId", requireAuth, (c) => {
+  const userId = c.req.param("userId")!;
   const settings = getUserSettings(userId);
 
   return c.json({ settings });
 });
 
-app.put("/api/settings/:userId", async (c) => {
-  const userId = c.req.param("userId");
+app.put("/api/settings/:userId", requireAuth, async (c) => {
+  const userId = c.req.param("userId")!;
   const body = await c.req.json();
 
-  const settings = updateUserSettings({
+  const result = updateUserSettings({
     userId,
     training: body.training,
     focus: body.focus,
   });
+
+  if ("error" in result) {
+    return c.json({ error: result.error }, 400);
+  }
 
   trackEvent({
     type: "settings.updated",
     timestamp: Date.now(),
     metadata: {
       userId,
-      training: settings.training,
-      focus: settings.focus,
+      training: result.settings.training,
+      focus: result.settings.focus,
     },
   });
 
   evaluateSystemAlerts();
 
-  return c.json({ settings });
+  return c.json({ settings: result.settings });
 });
 
-app.post("/api/session/start", async (c) => {
+// ── Session ───────────────────────────────────────────────────────────────────
+
+app.post("/api/session/start", requireAuth, async (c) => {
   const body = await c.req.json();
   const { userId, mode } = body as {
     userId?: string;
-    mode?: "training" | "focus";
+    mode?: string;
   };
 
   if (!userId || !mode) {
     return c.json({ error: "Missing required fields" }, 400);
+  }
+
+  // Validate mode explicitly — unknown values must not silently start a session
+  if (mode !== "training" && mode !== "focus") {
+    return c.json({ error: "Invalid mode. Must be 'training' or 'focus'" }, 400);
   }
 
   const settings = getUserSettings(userId);
@@ -151,7 +223,7 @@ app.post("/api/session/start", async (c) => {
       error.message === "ACTIVE_SESSION_ALREADY_EXISTS"
     ) {
       return c.json(
-        { error: "Active session already exists for this user" },
+        { error: "An active session already exists for this user" },
         409,
       );
     }
@@ -171,7 +243,7 @@ app.post("/api/session/start", async (c) => {
   }
 });
 
-app.post("/api/session/pause", async (c) => {
+app.post("/api/session/pause", requireAuth, async (c) => {
   const body = await c.req.json();
   const { userId } = body as { userId?: string };
 
@@ -200,7 +272,7 @@ app.post("/api/session/pause", async (c) => {
   return c.json({ session });
 });
 
-app.post("/api/session/resume", async (c) => {
+app.post("/api/session/resume", requireAuth, async (c) => {
   const body = await c.req.json();
   const { userId } = body as { userId?: string };
 
@@ -229,7 +301,7 @@ app.post("/api/session/resume", async (c) => {
   return c.json({ session });
 });
 
-app.post("/api/session/stop", async (c) => {
+app.post("/api/session/stop", requireAuth, async (c) => {
   const body = await c.req.json();
   const { userId } = body as { userId?: string };
 
@@ -239,6 +311,8 @@ app.post("/api/session/stop", async (c) => {
 
   const session = stopSession(userId);
 
+  // stopSession returns null if the session is already stopped/completed or
+  // doesn't exist — ensures addHistoryRecord is never called twice.
   if (!session) {
     return c.json({ error: "No active session found" }, 404);
   }
@@ -267,25 +341,81 @@ app.post("/api/session/stop", async (c) => {
   return c.json({ session });
 });
 
-app.get("/api/session/:userId", (c) => {
-  const userId = c.req.param("userId");
-  const session = getActiveSession(userId);
+/**
+ * /api/session/complete — called by the client when the timer reaches zero naturally.
+ * Distinct from /stop: creates a history record with finalStatus "completed"
+ * and emits a "session.completed" telemetry event instead of "session.stopped".
+ */
+app.post("/api/session/complete", requireAuth, async (c) => {
+  const body = await c.req.json();
+  const { userId } = body as { userId?: string };
+
+  if (!userId) {
+    return c.json({ error: "Missing userId" }, 400);
+  }
+
+  const session = completeSession(userId);
 
   if (!session) {
-    return c.json({ session: null });
+    return c.json({ error: "No running session found" }, 404);
   }
+
+  addHistoryRecord({
+    userId,
+    mode: session.mode,
+    startedAt: session.startedAt,
+    endedAt: Date.now(),
+    finalStatus: "completed",
+    configSnapshot: session.configSnapshot,
+  });
+
+  trackEvent({
+    type: "session.completed",
+    timestamp: Date.now(),
+    metadata: {
+      userId,
+      mode: session.mode,
+      sessionId: session.id,
+    },
+  });
+
+  evaluateSystemAlerts();
 
   return c.json({ session });
 });
 
-app.get("/api/admin/alerts", (c) => {
+app.get("/api/session/:userId", requireAuth, (c) => {
+  const userId = c.req.param("userId")!;
+  const session = getActiveSession(userId);
+
+  return c.json({ session: session ?? null });
+});
+
+// ── History ───────────────────────────────────────────────────────────────────
+
+app.get("/api/history/:userId", requireAuth, (c) => {
+  const userId = c.req.param("userId")!;
+  const history = getHistoryForUser(userId);
+
+  return c.json({ history });
+});
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/telemetry", requireAdmin, (c) => {
+  return c.json({
+    events: getEvents(),
+  });
+});
+
+app.get("/api/admin/alerts", requireAdmin, (c) => {
   return c.json({
     alerts: getAlerts(),
   });
 });
 
-app.post("/api/admin/alerts/:alertId/ack", (c) => {
-  const alertId = c.req.param("alertId");
+app.post("/api/admin/alerts/:alertId/ack", requireAdmin, (c) => {
+  const alertId = c.req.param("alertId")!;
   const alert = acknowledgeAlert(alertId);
 
   if (!alert) {
@@ -306,14 +436,14 @@ app.post("/api/admin/alerts/:alertId/ack", (c) => {
   return c.json({ alert });
 });
 
-app.get("/api/admin/rules", (c) => {
+app.get("/api/admin/rules", requireAdmin, (c) => {
   return c.json({
     rules: getAlertRules(),
   });
 });
 
-app.put("/api/admin/rules/:code", async (c) => {
-  const code = c.req.param("code") as
+app.put("/api/admin/rules/:code", requireAdmin, async (c) => {
+  const code = c.req.param("code")! as
     | "failed_logins_spike"
     | "api_errors_spike"
     | "unusual_admin_activity"
@@ -344,19 +474,6 @@ app.put("/api/admin/rules/:code", async (c) => {
   evaluateSystemAlerts();
 
   return c.json({ rule });
-});
-
-app.get("/api/history/:userId", (c) => {
-  const userId = c.req.param("userId");
-  const history = getHistoryForUser(userId);
-
-  return c.json({ history });
-});
-
-app.get("/api/admin/telemetry", (c) => {
-  return c.json({
-    events: getEvents(),
-  });
 });
 
 export default app;

@@ -1,25 +1,6 @@
-export type AlertRuleCode =
-  | "failed_logins_spike"
-  | "api_errors_spike"
-  | "unusual_admin_activity"
-  | "burst_session_activity";
+import type { AlertRuleCode, AlertRule, AlertRecord, TelemetryEvent } from "@repo/core";
 
-export type AlertRule = {
-  code: AlertRuleCode;
-  label: string;
-  enabled: boolean;
-  threshold: number;
-};
-
-export type AlertRecord = {
-  id: string;
-  ruleCode: AlertRuleCode;
-  message: string;
-  status: "open" | "acknowledged";
-  createdAt: number;
-  acknowledgedAt: number | null;
-  metadata?: Record<string, unknown>;
-};
+export type { AlertRuleCode, AlertRule, AlertRecord };
 
 const defaultRules: AlertRule[] = [
   {
@@ -88,20 +69,27 @@ export function getAlerts(): AlertRecord[] {
 }
 
 export function acknowledgeAlert(alertId: string): AlertRecord | null {
-  const existing = alertsStore.find((alert) => alert.id === alertId);
+  const index = alertsStore.findIndex((alert) => alert.id === alertId);
 
-  if (!existing) {
+  if (index === -1) {
     return null;
   }
+
+  const existing = alertsStore[index];
 
   if (existing.status === "acknowledged") {
     return existing;
   }
 
-  existing.status = "acknowledged";
-  existing.acknowledgedAt = Date.now();
+  // Immutable update — consistent with the rest of the codebase
+  const acknowledged: AlertRecord = {
+    ...existing,
+    status: "acknowledged",
+    acknowledgedAt: Date.now(),
+  };
 
-  return existing;
+  alertsStore[index] = acknowledged;
+  return acknowledged;
 }
 
 function createAlert(params: {
@@ -124,66 +112,49 @@ function createAlert(params: {
 }
 
 function countRecentEvents(
-  events: Array<{
-    type: string;
-    timestamp: number;
-    metadata?: Record<string, unknown>;
-  }>,
+  events: TelemetryEvent[],
   type: string,
   windowMs: number,
-) {
-  const now = Date.now();
+): number {
+  const cutoff = Date.now() - windowMs;
   return events.filter(
-    (event) => event.type === type && now - event.timestamp <= windowMs,
+    (event) => event.type === type && event.timestamp >= cutoff,
   ).length;
 }
 
+/**
+ * Counts actual admin actions only.
+ * "settings.updated" is a user action and is intentionally excluded here.
+ * Admin events are those with the "admin." prefix (e.g. admin.alert.acknowledged,
+ * admin.rule.updated).
+ */
 function countRecentAdminActivity(
-  events: Array<{
-    type: string;
-    timestamp: number;
-    metadata?: Record<string, unknown>;
-  }>,
+  events: TelemetryEvent[],
   windowMs: number,
-) {
-  const now = Date.now();
+): number {
+  const cutoff = Date.now() - windowMs;
   return events.filter((event) => {
-    const isRecent = now - event.timestamp <= windowMs;
-    const isAdminEvent =
-      event.type === "settings.updated" || event.type.startsWith("admin.");
-
-    return isRecent && isAdminEvent;
+    return event.timestamp >= cutoff && event.type.startsWith("admin.");
   }).length;
 }
 
 function countRecentSessionStarts(
-  events: Array<{
-    type: string;
-    timestamp: number;
-    metadata?: Record<string, unknown>;
-  }>,
+  events: TelemetryEvent[],
   windowMs: number,
-) {
-  const now = Date.now();
+): number {
+  const cutoff = Date.now() - windowMs;
   return events.filter(
-    (event) =>
-      event.type === "session.started" && now - event.timestamp <= windowMs,
+    (event) => event.type === "session.started" && event.timestamp >= cutoff,
   ).length;
 }
 
-function hasOpenAlertForRule(ruleCode: AlertRuleCode) {
+function hasOpenAlertForRule(ruleCode: AlertRuleCode): boolean {
   return alertsStore.some(
     (alert) => alert.ruleCode === ruleCode && alert.status === "open",
   );
 }
 
-export function evaluateAlerts(
-  events: Array<{
-    type: string;
-    timestamp: number;
-    metadata?: Record<string, unknown>;
-  }>,
-) {
+export function evaluateAlerts(events: TelemetryEvent[]): void {
   const windowMs = 5 * 60 * 1000;
 
   for (const rule of rulesStore) {
@@ -201,7 +172,7 @@ export function evaluateAlerts(
       if (count >= rule.threshold) {
         createAlert({
           ruleCode: rule.code,
-          message: `Failed login spike detected: ${count} failed logins in the last 5 minutes.`,
+          message: `Failed login spike: ${count} failed logins in the last 5 minutes.`,
           metadata: { count, windowMinutes: 5 },
         });
       }
@@ -213,7 +184,7 @@ export function evaluateAlerts(
       if (count >= rule.threshold) {
         createAlert({
           ruleCode: rule.code,
-          message: `API error spike detected: ${count} API errors in the last 5 minutes.`,
+          message: `API error spike: ${count} errors in the last 5 minutes.`,
           metadata: { count, windowMinutes: 5 },
         });
       }
@@ -225,7 +196,7 @@ export function evaluateAlerts(
       if (count >= rule.threshold) {
         createAlert({
           ruleCode: rule.code,
-          message: `Unusual admin activity detected: ${count} admin actions in the last 5 minutes.`,
+          message: `Unusual admin activity: ${count} admin actions in the last 5 minutes.`,
           metadata: { count, windowMinutes: 5 },
         });
       }
@@ -237,7 +208,7 @@ export function evaluateAlerts(
       if (count >= rule.threshold) {
         createAlert({
           ruleCode: rule.code,
-          message: `Burst session activity detected: ${count} session starts in the last 5 minutes.`,
+          message: `Burst session activity: ${count} session starts in the last 5 minutes.`,
           metadata: { count, windowMinutes: 5 },
         });
       }

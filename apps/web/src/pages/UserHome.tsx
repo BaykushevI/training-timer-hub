@@ -1,65 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Session, UserSettings, HistoryRecord } from "@repo/core";
 import { AppShell } from "../components/AppShell";
 import { UserWorkspaceTabs } from "../components/UserWorkspaceTabs";
 import type { LoggedInUser } from "./LoginPage";
 import { UserSettingsPage } from "./UserSettingsPage";
 import { UserTimerPage } from "./UserTimerPage";
-
-type TrainingSettings = {
-  workSeconds: number;
-  restSeconds: number;
-  rounds: number;
-};
-
-type FocusSettings = {
-  focusSeconds: number;
-  shortBreakSeconds: number;
-  cycles: number;
-};
-
-type UserSettings = {
-  userId: string;
-  training: TrainingSettings;
-  focus: FocusSettings;
-};
-
-type Session =
-  | {
-      id: string;
-      userId: string;
-      mode: "training";
-      startedAt: number;
-      status: "running" | "paused" | "stopped";
-      pausedAt: number | null;
-      totalPausedMs: number;
-      configSnapshot: {
-        mode: "training";
-        training: TrainingSettings;
-      };
-    }
-  | {
-      id: string;
-      userId: string;
-      mode: "focus";
-      startedAt: number;
-      status: "running" | "paused" | "stopped";
-      pausedAt: number | null;
-      totalPausedMs: number;
-      configSnapshot: {
-        mode: "focus";
-        focus: FocusSettings;
-      };
-    };
-
-type HistoryRecord = {
-  id: string;
-  userId: string;
-  mode: "training" | "focus";
-  startedAt: number;
-  endedAt: number;
-  finalStatus: "stopped";
-  configSnapshot: Record<string, unknown>;
-};
 
 type UserTab = "training" | "focus" | "settings";
 
@@ -74,11 +19,12 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
   const [activeTab, setActiveTab] = useState<UserTab>("training");
   const [session, setSession] = useState<Session | null>(null);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
 
+  // Settings form state — single source of truth for the form fields
   const [trainingWorkSeconds, setTrainingWorkSeconds] = useState(60);
   const [trainingRestSeconds, setTrainingRestSeconds] = useState(10);
   const [trainingRounds, setTrainingRounds] = useState(6);
@@ -86,12 +32,26 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
   const [focusShortBreakSeconds, setFocusShortBreakSeconds] = useState(300);
   const [focusCycles, setFocusCycles] = useState(4);
 
+  // Guard against triggering auto-complete multiple times for the same session
+  const completionTriggeredRef = useRef(false);
+
+  const authHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${user.token}`,
+  };
+
   useEffect(() => {
     async function loadInitialData() {
       const [sessionRes, settingsRes, historyRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/session/${user.id}`),
-        fetch(`${API_BASE_URL}/api/settings/${user.id}`),
-        fetch(`${API_BASE_URL}/api/history/${user.id}`),
+        fetch(`${API_BASE_URL}/api/session/${user.id}`, {
+          headers: { Authorization: `Bearer ${user.token}` },
+        }),
+        fetch(`${API_BASE_URL}/api/settings/${user.id}`, {
+          headers: { Authorization: `Bearer ${user.token}` },
+        }),
+        fetch(`${API_BASE_URL}/api/history/${user.id}`, {
+          headers: { Authorization: `Bearer ${user.token}` },
+        }),
       ]);
 
       const sessionData = await sessionRes.json();
@@ -99,26 +59,36 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
       const historyData = await historyRes.json();
 
       setSession(sessionData.session);
-      setSettings(settingsData.settings);
       setHistory(historyData.history ?? []);
 
       if (settingsData.settings) {
-        setTrainingWorkSeconds(settingsData.settings.training.workSeconds);
-        setTrainingRestSeconds(settingsData.settings.training.restSeconds);
-        setTrainingRounds(settingsData.settings.training.rounds);
-        setFocusSeconds(settingsData.settings.focus.focusSeconds);
-        setFocusShortBreakSeconds(
-          settingsData.settings.focus.shortBreakSeconds,
-        );
-        setFocusCycles(settingsData.settings.focus.cycles);
+        syncFormState(settingsData.settings as UserSettings);
       }
     }
 
     loadInitialData();
   }, [user.id]);
 
+  // Sync the 6 form variables from a confirmed UserSettings object.
+  // Called on initial load and after a successful save to keep form state
+  // consistent with the server-confirmed values.
+  function syncFormState(s: UserSettings) {
+    setTrainingWorkSeconds(s.training.workSeconds);
+    setTrainingRestSeconds(s.training.restSeconds);
+    setTrainingRounds(s.training.rounds);
+    setFocusSeconds(s.focus.focusSeconds);
+    setFocusShortBreakSeconds(s.focus.shortBreakSeconds);
+    setFocusCycles(s.focus.cycles);
+  }
+
+  // Depend only on id and status — not the entire session object.
+  // This prevents the interval from being torn down and recreated on every
+  // refreshSession() call while the session is still "running".
+  const sessionId = session?.id;
+  const sessionStatus = session?.status;
+
   useEffect(() => {
-    if (!session || session.status !== "running") {
+    if (!sessionId || sessionStatus !== "running") {
       return;
     }
 
@@ -129,34 +99,43 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [session]);
+  }, [sessionId, sessionStatus]);
+
+  // Reset auto-complete guard when the session changes
+  useEffect(() => {
+    completionTriggeredRef.current = false;
+  }, [sessionId]);
 
   async function refreshSession() {
-    const res = await fetch(`${API_BASE_URL}/api/session/${user.id}`);
+    const res = await fetch(`${API_BASE_URL}/api/session/${user.id}`, {
+      headers: { Authorization: `Bearer ${user.token}` },
+    });
     const data = await res.json();
     setSession(data.session);
   }
 
   async function refreshHistory() {
-    const res = await fetch(`${API_BASE_URL}/api/history/${user.id}`);
+    const res = await fetch(`${API_BASE_URL}/api/history/${user.id}`, {
+      headers: { Authorization: `Bearer ${user.token}` },
+    });
     const data = await res.json();
     setHistory(data.history ?? []);
   }
 
   async function startTraining() {
     setLoading(true);
+    setError(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/session/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          mode: "training",
-        }),
+        headers: authHeaders,
+        body: JSON.stringify({ userId: user.id, mode: "training" }),
       });
 
       if (!response.ok) {
+        const data = await response.json();
+        setError(data.error ?? "Failed to start session");
         return;
       }
 
@@ -169,18 +148,18 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
 
   async function startFocus() {
     setLoading(true);
+    setError(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/session/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          mode: "focus",
-        }),
+        headers: authHeaders,
+        body: JSON.stringify({ userId: user.id, mode: "focus" }),
       });
 
       if (!response.ok) {
+        const data = await response.json();
+        setError(data.error ?? "Failed to start session");
         return;
       }
 
@@ -193,17 +172,18 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
 
   async function pauseCurrentSession() {
     setLoading(true);
+    setError(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/session/pause`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-        }),
+        headers: authHeaders,
+        body: JSON.stringify({ userId: user.id }),
       });
 
       if (!response.ok) {
+        const data = await response.json();
+        setError(data.error ?? "Failed to pause session");
         return;
       }
 
@@ -216,17 +196,18 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
 
   async function resumeCurrentSession() {
     setLoading(true);
+    setError(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/session/resume`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-        }),
+        headers: authHeaders,
+        body: JSON.stringify({ userId: user.id }),
       });
 
       if (!response.ok) {
+        const data = await response.json();
+        setError(data.error ?? "Failed to resume session");
         return;
       }
 
@@ -239,15 +220,21 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
 
   async function stopCurrentSession() {
     setLoading(true);
+    setError(null);
 
     try {
-      await fetch(`${API_BASE_URL}/api/session/stop`, {
+      const response = await fetch(`${API_BASE_URL}/api/session/stop`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-        }),
+        headers: authHeaders,
+        body: JSON.stringify({ userId: user.id }),
       });
+
+      // Unlike other actions, stop always refreshes — even on non-ok response —
+      // so the UI reflects current server state accurately.
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error ?? "Failed to stop session");
+      }
 
       await refreshSession();
       await refreshHistory();
@@ -257,13 +244,44 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
     }
   }
 
+  /**
+   * Called by UserTimerPage when the derived countdown reaches zero.
+   * Uses /api/session/complete to record finalStatus "completed" instead of
+   * "stopped", producing accurate session history and telemetry.
+   */
+  async function completeCurrentSession() {
+    if (completionTriggeredRef.current || loading) return;
+    completionTriggeredRef.current = true;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/session/complete`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      if (!response.ok) {
+        // Completion may fail if session was already stopped manually.
+        // This is not an error worth surfacing — just sync state.
+      }
+
+      await refreshSession();
+      await refreshHistory();
+      setNow(Date.now());
+    } catch {
+      // Network error during auto-complete: silently re-sync
+      await refreshSession();
+    }
+  }
+
   async function saveSettings() {
     setSavingSettings(true);
+    setError(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/settings/${user.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify({
           training: {
             workSeconds: trainingWorkSeconds,
@@ -278,8 +296,17 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
         }),
       });
 
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.error ?? "Failed to save settings");
+        return;
+      }
+
       const data = await response.json();
-      setSettings(data.settings);
+      // Sync both the settings object and the individual form variables from
+      // the server response. This ensures the form reflects server-confirmed
+      // values (e.g. if the server clamps or normalizes any field).
+      syncFormState(data.settings);
     } finally {
       setSavingSettings(false);
     }
@@ -292,6 +319,12 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
       title="User Workspace"
       subtitle="Entry point for timer modes, active session controls, and session history."
     >
+      {error ? (
+        <div className="mb-4 rounded-xl border border-rose-900/40 bg-rose-950/30 px-4 py-3 text-sm text-rose-300">
+          {error}
+        </div>
+      ) : null}
+
       <UserWorkspaceTabs activeTab={activeTab} onChange={setActiveTab} />
 
       {activeTab === "training" ? (
@@ -306,6 +339,7 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
           onPause={pauseCurrentSession}
           onResume={resumeCurrentSession}
           onStop={stopCurrentSession}
+          onComplete={completeCurrentSession}
         />
       ) : null}
 
@@ -321,6 +355,7 @@ export function UserHome({ user, onLogout }: UserHomeProps) {
           onPause={pauseCurrentSession}
           onResume={resumeCurrentSession}
           onStop={stopCurrentSession}
+          onComplete={completeCurrentSession}
         />
       ) : null}
 

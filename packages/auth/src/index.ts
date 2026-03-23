@@ -15,6 +15,11 @@ const users: User[] = [
   },
 ];
 
+// In-memory token store: token → User
+// Tokens are UUIDs created at login. For L1, tokens persist for the worker
+// lifetime (cleared on restart). L2 would add expiry and persistent storage.
+const tokenStore = new Map<string, User>();
+
 export function login(email: string, password: string): User | null {
   const user = users.find((u) => u.email === email);
 
@@ -22,4 +27,14 @@ export function login(email: string, password: string): User | null {
   if (user.password !== password) return null;
 
   return user;
+}
+
+export function createToken(user: User): string {
+  const token = crypto.randomUUID();
+  tokenStore.set(token, user);
+  return token;
+}
+
+export function validateToken(token: string): User | null {
+  return tokenStore.get(token) ?? null;
 }

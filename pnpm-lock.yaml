@@ -48,6 +48,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@repo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -101,7 +104,11 @@ importers:
         specifier: ^8.0.1
         version: 8.0.1(@types/node@24.12.0)(esbuild@0.27.3)(jiti@1.21.7)(yaml@2.8.3)
 
-  packages/alerts: {}
+  packages/alerts:
+    dependencies:
+      '@repo/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/auth:
     dependencies:
@@ -111,13 +118,29 @@ importers:
 
   packages/core: {}
 
-  packages/history: {}
+  packages/history:
+    dependencies:
+      '@repo/core':
+        specifier: workspace:*
+        version: link:../core
 
-  packages/session: {}
+  packages/session:
+    dependencies:
+      '@repo/core':
+        specifier: workspace:*
+        version: link:../core
 
-  packages/settings: {}
+  packages/settings:
+    dependencies:
+      '@repo/core':
+        specifier: workspace:*
+        version: link:../core
 
-  packages/telemetry: {}
+  packages/telemetry:
+    dependencies:
+      '@repo/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

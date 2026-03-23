@@ -1,166 +1,188 @@
-# Module Boundaries
+# Architecture
 
-## Core
+## L1 Modular Monolith
 
-Shared types and low-level contracts.
-
-Responsibilities:
-
-- common type definitions
-- shared primitives
-- cross-module type reuse
+Training Timer Hub is a single deployable unit composed of explicitly bounded modules.
+Each module owns its domain. The API layer orchestrates them — it does not contain
+domain logic that belongs in a module.
 
 ---
 
-## Auth
+## Deployment Units
 
-Authentication and role resolution.
+```
+┌─────────────────────────────────────────────────────┐
+│  Cloudflare Workers (single worker)                 │
+│                                                     │
+│  apps/api  ←→  packages/*                          │
+│                                                     │
+│  In-memory state lives here. Cleared on restart.   │
+└─────────────────────────────────────────────────────┘
 
-Responsibilities:
-
-- validate credentials
-- expose login use case
-- distinguish between user and admin roles
-
-Does not own:
-
-- timer logic
-- settings logic
-- alerts logic
-
----
-
-## Session
-
-Runtime session lifecycle.
-
-Responsibilities:
-
-- start session
-- pause session
-- resume session
-- stop session
-- enforce one active session per user
-- persist config snapshot for the active session
-
-Does not own:
-
-- settings persistence
-- telemetry storage
-- history persistence
+┌─────────────────────────────────────────────────────┐
+│  Cloudflare Pages (static frontend)                 │
+│                                                     │
+│  apps/web  (React + Vite)                          │
+└─────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Settings
+## Module Map
 
-User-specific timer configuration.
+```
+@repo/core
+  └─ Shared domain types (single source of truth)
+     TrainingConfig, FocusConfig, UserSettings
+     Session, SessionStatus, SessionConfigSnapshot
+     HistoryRecord, HistoryFinalStatus
+     TelemetryEvent, AlertRule, AlertRecord
 
-Responsibilities:
+@repo/auth
+  └─ login(email, password): User | null
+  └─ createToken(user): string
+  └─ validateToken(token): User | null
 
-- training timer configuration
-- focus timer configuration
-- default values
-- config updates
+@repo/session
+  └─ startTrainingSession / startFocusSession
+  └─ pauseSession / resumeSession
+  └─ stopSession      → terminal, manual
+  └─ completeSession  → terminal, natural (timer = 0)
+  └─ getActiveSession
 
-Does not own:
+@repo/settings
+  └─ getUserSettings
+  └─ updateUserSettings (with input validation)
 
-- live session state
+@repo/history
+  └─ addHistoryRecord (finalStatus: "stopped" | "completed")
+  └─ getHistoryForUser
 
----
+@repo/telemetry
+  └─ trackEvent
+  └─ getEvents
 
-## History
-
-Completed session records.
-
-Responsibilities:
-
-- store completed session history
-- return recent records for a user
-
-Does not own:
-
-- active runtime sessions
-
----
-
-## Telemetry
-
-System event collection.
-
-Responsibilities:
-
-- collect operational events
-- expose recent events for admin visibility
-
-Examples:
-
-- auth.login.success
-- auth.login.failed
-- session.started
-- session.paused
-- session.resumed
-- session.stopped
-- settings.updated
-- api.error
+@repo/alerts
+  └─ evaluateAlerts (5-min sliding window)
+  └─ getAlertRules / updateAlertRule
+  └─ getAlerts / acknowledgeAlert
+```
 
 ---
 
-## Alerts
+## API Layer — Orchestration Only
 
-Threshold-based operational alerting.
+`apps/api/src/index.ts` is the only place that calls across module boundaries.
+No module imports from another module.
 
-Responsibilities:
+**Middleware chain:**
 
-- maintain alert rules
-- evaluate telemetry trends
-- create alert records
-- acknowledge alerts
+```
+Request
+  → CORS
+  → requireAuth (all routes except /api/health and /api/auth/login)
+  → requireAdmin (/api/admin/* routes)
+  → route handler
+      → calls module functions
+      → calls trackEvent
+      → calls evaluateAlerts
+  → Response
+```
 
-Examples:
-
-- failed login spike
-- API error spike
-- unusual admin activity
-- burst session activity
-
----
-
-## Admin
-
-Admin-facing orchestration and visibility layer.
-
-Responsibilities:
-
-- view telemetry
-- view alerts
-- update alert rules
-- acknowledge alerts
+**Auth enforcement:**
+- `requireAuth`: validates token, any role
+- `requireAdmin`: validates token, role must be "admin"
+- Both read the `Authorization: Bearer <token>` header
 
 ---
 
-## Frontend Views
+## Session Lifecycle
 
-### Login
+```
+              pause
+running ──────────────▶ paused
+   ▲                      │
+   └──────────────────────┘ resume
+   │
+   ├── stop  ──▶ stopped   (finalStatus: "stopped"  in history)
+   │
+   └── timer=0 ──▶ completed (finalStatus: "completed" in history)
+```
 
-Authentication entry point.
-
-### Admin Workspace
-
-Operational dashboard for telemetry, rules, and alerts.
-
-### User Workspace
-
-Runtime timer workspace.
-
-Sub-views:
-
-- Training
-- Focus
-- Settings
+**State invariants:**
+- Only one active session per user (`running` or `paused`)
+- `stopSession` returns null if session is already terminal — prevents duplicate history records
+- `completeSession` only valid from `running` (paused time is not advancing)
+- Config snapshot is captured at start time — immutable for the session's lifetime
 
 ---
 
-## Boundary Principle
+## Telemetry & Alerting
 
-Each module owns its own logic and state shape.
-The API layer orchestrates modules but does not contain domain behavior that belongs in the modules.
+**Event taxonomy:**
+
+| Prefix | Owner | Counted as admin activity? |
+|--------|-------|---------------------------|
+| `auth.*` | auth flow | No |
+| `session.*` | session lifecycle | No |
+| `settings.updated` | user action | **No** |
+| `api.error` | unexpected errors | No |
+| `admin.*` | admin actions | **Yes** |
+
+**Alert deduplication:** Only one open alert per rule code at a time.
+A new alert for a rule is only created after the previous one is acknowledged.
+
+**False positive prevention:** `settings.updated` is explicitly excluded from
+the `unusual_admin_activity` count. Only `admin.*` events (e.g., `admin.alert.acknowledged`,
+`admin.rule.updated`) contribute to that rule.
+
+---
+
+## Type Ownership
+
+All shared types live in `@repo/core`. This is the single source of truth.
+
+- Backend packages import types from `@repo/core` via workspace dependency
+- The frontend (`apps/web`) imports types from `@repo/core` via Vite alias
+- No type is redeclared in multiple places
+
+This means a type change in `@repo/core` produces compile errors everywhere that
+needs updating — not silent drift.
+
+---
+
+## Frontend Architecture
+
+**State management:** React hooks only. No external state library.
+
+**Timer calculation:** All countdown math is client-side. The backend stores
+`startedAt`, `pausedAt`, `totalPausedMs`. The frontend computes:
+
+```
+effectiveElapsed = now - startedAt - totalPausedMs
+currentPhase     = effectiveElapsed % cycleLength
+phaseRemaining   = clamp(cycleLength - currentPhase, 0, cycleLength)
+```
+
+Clamped to 0 when `totalProgramSeconds - effectiveElapsed ≤ 0`.
+
+**Auto-complete trigger:** When `remainingProgramSeconds === 0` and session
+`status === "running"`, the frontend calls `POST /api/session/complete`. A ref
+guard in `UserHome` ensures this fires at most once per session.
+
+**Auth:** `LoggedInUser` includes `token`. All `fetch` calls include
+`Authorization: Bearer <token>`. Admin pages use `requireAdmin`-protected
+endpoints.
+
+---
+
+## Known Limitations (L1 Scope)
+
+| Area | Limitation | L2 path |
+|------|-----------|---------|
+| Storage | In-memory, cleared on restart | Durable Objects / D1 |
+| Auth | Tokens cleared on restart, plaintext passwords | Expiring tokens, bcrypt |
+| Multi-isolate | Cloudflare may spawn multiple isolates in production | Durable Objects |
+| Alert evaluation | Inline on every request, not scheduled | Scheduled Workers |
+| Real-time | No push — admin must refresh | WebSocket / SSE |
+| CORS | Hardcoded origin | Environment variable |
